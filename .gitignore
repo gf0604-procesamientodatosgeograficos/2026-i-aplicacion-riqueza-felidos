@@ -1,0 +1,26 @@
+# Archivos de historial y sesión de R
+.Rhistory
+.RData
+.RDataTmp
+.Ruserdata
+
+# RStudio
+.Rproj.user/
+
+# Quarto
+/.quarto/
+*_cache/
+*.quarto_ipynb
+**/*.quarto_ipynb
+
+# Variables de entorno
+.Renviron
+
+# Salida renderizada (se genera al desplegar a shinyapps.io)
+/index.html
+/index_files/
+/index_data/
+/docs/
+
+# Metadatos de despliegue de rsconnect
+/rsconnect/

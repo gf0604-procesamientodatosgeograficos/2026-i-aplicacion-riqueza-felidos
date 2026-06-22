@@ -1,0 +1,315 @@
+---
+title: "Riqueza de félidos de Costa Rica (aplicación interactiva)"
+author: "Manuel Vargas"
+format:
+  dashboard:
+    nav-buttons:
+      - icon: github
+        href: https://github.com/gf0604-procesamientodatosgeograficos/2026-i-aplicacion-riqueza-felidos/blob/main/index.qmd
+server: shiny
+lang: es
+---
+
+```{r}
+#| label: carga-paquetes
+#| context: setup
+#| message: false
+#| warning: false
+
+# Carga de paquetes (se ejecuta tanto en la interfaz como en el servidor)
+library(tidyverse)      # manipulación de datos
+library(sf)             # datos vectoriales
+library(plotly)         # gráficos interactivos
+library(DT)             # tablas interactivas
+library(leaflet)        # mapas interactivos
+library(shiny)          # aplicaciones interactivas
+library(bslib)          # componentes de interfaz (cajas de valor)
+library(bsicons)        # íconos de Bootstrap
+```
+
+```{r}
+#| label: carga-datos
+#| context: data
+#| message: false
+#| warning: false
+
+# Áreas de conservación del SINAC (polígonos)
+areas_conservacion <- st_read(
+  "https://github.com/gf0604-procesamientodatosgeograficos/2026-i/raw/refs/heads/main/datos/sinac/areas-conservacion.gpkg",
+  quiet = TRUE
+)
+
+# Registros de presencia de félidos silvestres (puntos)
+felidos <- st_read(
+  "https://raw.githubusercontent.com/gf0604-procesamientodatosgeograficos/2026-i/refs/heads/main/datos/gbif/felidos.csv",
+  options = c(
+    "X_POSSIBLE_NAMES=decimalLongitude", # columna de longitud decimal
+    "Y_POSSIBLE_NAMES=decimalLatitude"   # columna de latitud decimal
+  ),
+  quiet = TRUE
+)
+
+# Asignar CRS WGS84
+st_crs(felidos) <- 4326
+
+# Unión espacial: a cada registro de félido se le agrega el código, el nombre
+# y las siglas del área de conservación que lo contiene. Se usan las geometrías
+# ORIGINALES (sin simplificar), para no perder precisión en los bordes.
+felidos <- st_join(
+  x = felidos,
+  y = dplyr::select(areas_conservacion, codigo_ac, nombre_ac, siglas_ac),
+  join = st_intersects
+)
+
+# Versión SIMPLIFICADA de las áreas, solo para dibujarlas en el mapa.
+# La tolerancia se expresa en metros, por lo que se proyecta a CRTM05
+# (EPSG:5367) antes de simplificar y se regresa a WGS84 (EPSG:4326) para leaflet.
+areas_conservacion_simplificadas <-
+  areas_conservacion |>
+  st_transform(5367) |>
+  st_simplify(dTolerance = 500, preserveTopology = TRUE) |>
+  st_transform(4326)
+```
+
+# {.sidebar}
+
+```{r}
+#| label: filtro-especie
+
+# Lista de selección de especie (con la opción "Todas")
+selectInput(
+  inputId = "especie",
+  label   = "Especie",
+  choices = c("Todas", sort(unique(felidos$species))),
+  selected = "Todas"
+)
+```
+
+```{r}
+#| label: filtro-area
+
+# Lista de selección de área de conservación (con la opción "Todas")
+selectInput(
+  inputId = "area",
+  label   = "Área de conservación",
+  choices = c("Todas", sort(unique(areas_conservacion$nombre_ac))),
+  selected = "Todas"
+)
+```
+
+# Riqueza de félidos
+
+## Row {height="20%"}
+
+```{r}
+#| label: salida-valuebox-registros
+
+# Control de salida de la caja de valor de registros de presencia
+uiOutput(outputId = "vb_registros")
+```
+
+```{r}
+#| label: salida-valuebox-especies
+
+# Control de salida de la caja de valor de riqueza de especies
+uiOutput(outputId = "vb_especies")
+```
+
+```{r}
+#| label: salida-valuebox-areas
+
+# Control de salida de la caja de valor de áreas con mayor riqueza
+uiOutput(outputId = "vb_areas")
+```
+
+## Row {.tabset}
+
+### Mapa
+
+```{r}
+#| label: salida-mapa
+
+# Control de salida del mapa
+leafletOutput(outputId = "mapa")
+```
+
+### Gráfico
+
+```{r}
+#| label: salida-grafico
+
+# Control de salida del gráfico
+plotlyOutput(outputId = "grafico")
+```
+
+### Tabla
+
+```{r}
+#| label: salida-tabla
+
+# Control de salida de la tabla
+dataTableOutput(outputId = "tabla")
+```
+
+```{r}
+#| label: servidor
+#| context: server
+
+# Función reactiva que filtra los registros de félidos de acuerdo con
+# los valores seleccionados en la barra lateral. Se calcula una sola vez
+# y la comparten las tres salidas (mapa, gráfico y tabla).
+felidos_filtrados <- reactive({
+  resultado <- felidos
+
+  # Filtro por especie
+  if (input$especie != "Todas") {
+    resultado <- resultado |> filter(species == input$especie)
+  }
+
+  # Filtro por área de conservación
+  if (input$area != "Todas") {
+    resultado <- resultado |> filter(nombre_ac == input$area)
+  }
+
+  resultado
+})
+
+# Cajas de valor reactivas: cada una se construye con value_box() a partir de
+# felidos_filtrados() y se actualiza al cambiar los filtros de la barra lateral.
+
+# Total de registros de presencia de la selección actual
+output$vb_registros <- renderUI({
+  value_box(
+    title    = "Registros de presencia",
+    value    = nrow(felidos_filtrados()),
+    showcase = bs_icon("binoculars"),
+    theme    = "primary"
+  )
+})
+
+# Riqueza de especies (especies distintas) de la selección actual
+output$vb_especies <- renderUI({
+  value_box(
+    title    = "Riqueza de especies",
+    value    = n_distinct(felidos_filtrados()$species),
+    showcase = bs_icon("diagram-3"),
+    theme    = "success"
+  )
+})
+
+# Área(s) de conservación con mayor riqueza de la selección actual
+output$vb_areas <- renderUI({
+  riqueza_por_area <-
+    felidos_filtrados() |>
+    st_drop_geometry() |>
+    filter(!is.na(siglas_ac)) |>
+    group_by(siglas_ac) |>
+    summarize(riqueza = n_distinct(species), .groups = "drop")
+
+  if (nrow(riqueza_por_area) == 0) {
+    riqueza_maxima <- 0
+    siglas         <- "—"
+  } else {
+    riqueza_maxima <- max(riqueza_por_area$riqueza)
+    siglas <-
+      riqueza_por_area |>
+      filter(riqueza == riqueza_maxima) |>
+      pull(siglas_ac) |>
+      paste(collapse = ", ")
+  }
+
+  value_box(
+    title    = paste0("Áreas con mayor riqueza (", riqueza_maxima, " especies)"),
+    value    = siglas,
+    showcase = bs_icon("trophy"),
+    theme    = "warning"
+  )
+})
+
+# Mapa de registros de presencia (agrupados) sobre las áreas de conservación
+output$mapa <- renderLeaflet({
+  leaflet() |>
+    setView(lng = -84.2, lat = 9.6, zoom = 7) |>
+    addProviderTiles(providers$OpenStreetMap,    group = "OpenStreetMap") |>
+    addProviderTiles(providers$CartoDB.Positron, group = "CartoDB Positron") |>
+    addPolygons(
+      data        = areas_conservacion_simplificadas,
+      weight      = 1,
+      color       = "black",
+      fillOpacity = 0,
+      label       = ~nombre_ac,
+      group       = "Áreas de conservación"
+    ) |>
+    addCircleMarkers(
+      data           = felidos_filtrados(),
+      radius         = 5,
+      color          = "#41ab5d",
+      stroke         = FALSE,
+      fillOpacity    = 0.7,
+      label          = ~species,
+      popup          = ~paste0(
+        "<b>Especie:</b> ", species,   "<br/>",
+        "<b>Localidad:</b> ", locality, "<br/>",
+        "<b>Fecha:</b> ", eventDate
+      ),
+      clusterOptions = markerClusterOptions(),
+      group          = "Félidos"
+    ) |>
+    addLayersControl(
+      baseGroups    = c("OpenStreetMap", "CartoDB Positron"),
+      overlayGroups = c("Áreas de conservación", "Félidos"),
+      options       = layersControlOptions(collapsed = FALSE)
+    ) |>
+    addScaleBar(position = "bottomleft")
+})
+
+# Gráfico de barras de riqueza de especies por área de conservación
+output$grafico <- renderPlotly({
+  # Riqueza (especies distintas) por área de conservación entre los datos filtrados
+  riqueza_por_area <-
+    felidos_filtrados() |>
+    st_drop_geometry() |>
+    filter(!is.na(siglas_ac)) |>
+    group_by(siglas_ac, nombre_ac) |>
+    summarize(riqueza = n_distinct(species), .groups = "drop")
+
+  grafico_riqueza <-
+    riqueza_por_area |>
+    ggplot(aes(x = riqueza, y = reorder(siglas_ac, riqueza))) +
+    geom_col(
+      fill = "#41ab5d",
+      aes(text = paste0(
+        "Área de conservación: ", nombre_ac, "\n",
+        "Riqueza de félidos: ", riqueza
+      ))
+    ) +
+    xlab("Riqueza de especies de félidos") +
+    ylab("Área de conservación") +
+    theme_minimal()
+
+  ggplotly(grafico_riqueza, tooltip = "text") |>
+    config(locale = "es")
+})
+
+# Tabla de registros de presencia
+output$tabla <- renderDataTable({
+  felidos_filtrados() |>
+    st_drop_geometry() |>
+    dplyr::select(
+      gbifID, species, decimalLongitude, decimalLatitude,
+      locality, nombre_ac, eventDate
+    ) |>
+    datatable(
+      colnames = c(
+        "gbifID", "Especie", "Longitud", "Latitud",
+        "Localidad", "Área de conservación", "Fecha"
+      ),
+      rownames = FALSE,
+      options = list(
+        pageLength = 10,
+        language = list(url = '//cdn.datatables.net/plug-ins/1.10.11/i18n/Spanish.json')
+      )
+    ) |>
+    formatRound(c("decimalLongitude", "decimalLatitude"), digits = 5)
+})
+```
