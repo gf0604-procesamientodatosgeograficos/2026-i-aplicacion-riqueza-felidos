@@ -13,6 +13,10 @@
 *.quarto_ipynb
 **/*.quarto_ipynb
 
+# Cachés generadas durante el render (Quarto/Deno) y configuración de R
+/.cache/
+/.config/
+
 # Variables de entorno
 .Renviron
 
