@@ -22,6 +22,7 @@ library(sf)             # datos vectoriales
 library(plotly)         # gráficos interactivos
 library(DT)             # tablas interactivas
 library(leaflet)        # mapas interactivos
+library(leaflet.extras) # mapas de calor sobre leaflet
 library(shiny)          # aplicaciones interactivas
 library(bslib)          # componentes de interfaz (cajas de valor)
 library(bsicons)        # íconos de Bootstrap
@@ -61,6 +62,13 @@ felidos <- st_join(
   join = st_intersects
 )
 
+# Año del registro (extraído de eventDate), para el deslizador de rango de años
+felidos$anio <- suppressWarnings(as.integer(substr(as.character(felidos$eventDate), 1, 4)))
+
+# Rango de años disponible (ignorando registros sin fecha), para el slider
+anio_min <- min(felidos$anio, na.rm = TRUE)
+anio_max <- max(felidos$anio, na.rm = TRUE)
+
 # Versión SIMPLIFICADA de las áreas, solo para dibujarlas en el mapa.
 # La tolerancia se expresa en metros, por lo que se proyecta a CRTM05
 # (EPSG:5367) antes de simplificar y se regresa a WGS84 (EPSG:4326) para leaflet.
@@ -74,26 +82,78 @@ areas_conservacion_simplificadas <-
 # {.sidebar}
 
 ```{r}
-#| label: filtro-especie
+#| label: filtro-especies
 
-# Lista de selección de especie (con la opción "Todas")
-selectInput(
-  inputId = "especie",
-  label   = "Especie",
-  choices = c("Todas", sort(unique(felidos$species))),
-  selected = "Todas"
+# checkboxGroupInput: casillas de verificación para elegir una o varias
+# especies a la vez (selección múltiple). Inician todas seleccionadas.
+checkboxGroupInput(
+  inputId  = "especies",
+  label    = "Especies",
+  choices  = sort(unique(felidos$species)),
+  selected = sort(unique(felidos$species))
 )
 ```
 
 ```{r}
 #| label: filtro-area
 
-# Lista de selección de área de conservación (con la opción "Todas")
+# selectInput: lista desplegable de opción única (con la opción "Todas").
 selectInput(
-  inputId = "area",
-  label   = "Área de conservación",
-  choices = c("Todas", sort(unique(areas_conservacion$nombre_ac))),
+  inputId  = "area",
+  label    = "Área de conservación",
+  choices  = c("Todas", sort(unique(areas_conservacion$nombre_ac))),
   selected = "Todas"
+)
+```
+
+```{r}
+#| label: filtro-anios
+
+# sliderInput: deslizador de rango para filtrar por el año del registro.
+sliderInput(
+  inputId = "anios",
+  label   = "Rango de años",
+  min     = anio_min,
+  max     = anio_max,
+  value   = c(anio_min, anio_max),
+  step    = 1,
+  sep     = ""
+)
+```
+
+```{r}
+#| label: control-visualizacion
+
+# radioButtons: opción única entre varias alternativas, todas a la vista.
+# Controla cómo se dibujan los registros de presencia en el mapa.
+radioButtons(
+  inputId  = "vis_puntos",
+  label    = "Visualización de registros",
+  choices  = c("Agrupados", "Individuales", "Mapa de calor"),
+  selected = "Agrupados"
+)
+```
+
+```{r}
+#| label: control-coropleta
+
+# checkboxInput: casilla única (verdadero/falso) para mostrar u ocultar la
+# coropleta de riqueza de especies por área de conservación.
+checkboxInput(
+  inputId = "mostrar_coropleta",
+  label   = "Mostrar coropleta de riqueza",
+  value   = TRUE
+)
+```
+
+```{r}
+#| label: boton-reset
+
+# actionButton: botón que dispara una acción en el servidor; aquí restablece
+# todos los controles a sus valores iniciales (ver observeEvent en el servidor).
+actionButton(
+  inputId = "reset",
+  label   = "Restablecer filtros"
 )
 ```
 
@@ -164,15 +224,17 @@ dataTableOutput(outputId = "tabla")
 felidos_filtrados <- reactive({
   resultado <- felidos
 
-  # Filtro por especie
-  if (input$especie != "Todas") {
-    resultado <- resultado |> filter(species == input$especie)
-  }
+  # Filtro por especies (selección múltiple del checkboxGroupInput)
+  resultado <- resultado |> filter(species %in% input$especies)
 
   # Filtro por área de conservación
   if (input$area != "Todas") {
     resultado <- resultado |> filter(nombre_ac == input$area)
   }
+
+  # Filtro por rango de años (se conservan los registros sin fecha)
+  resultado <- resultado |>
+    filter(is.na(anio) | (anio >= input$anios[1] & anio <= input$anios[2]))
 
   resultado
 })
@@ -229,8 +291,9 @@ output$vb_areas <- renderUI({
   )
 })
 
-# Mapa de coropletas de riqueza por área de conservación, con los registros
-# de presencia (agrupados) encima. Todo se recalcula con los datos filtrados.
+# Mapa interactivo. Reacciona a los datos filtrados y, además, a dos controles
+# de presentación: la casilla de la coropleta y los botones de visualización de
+# registros (agrupados / individuales / mapa de calor).
 output$mapa <- renderLeaflet({
   datos <- felidos_filtrados()
 
@@ -250,52 +313,93 @@ output$mapa <- renderLeaflet({
   # Paleta de coropletas (verde) según la riqueza de especies
   paleta_riqueza <- colorNumeric(palette = "Greens", domain = areas_riqueza$riqueza)
 
-  leaflet() |>
+  # Mapa base
+  mapa <- leaflet() |>
     setView(lng = -84.2, lat = 9.6, zoom = 8) |>
     addProviderTiles(providers$OpenStreetMap,    group = "OpenStreetMap") |>
-    addProviderTiles(providers$CartoDB.Positron, group = "CartoDB Positron") |>
-    addPolygons(
-      data        = areas_riqueza,
-      weight      = 1,
-      color       = "black",
-      fillColor   = ~paleta_riqueza(riqueza),
-      fillOpacity = 0.7,
-      label       = ~nombre_ac,
-      popup       = ~paste0(
-        "<b>Área de conservación:</b> ", nombre_ac, "<br/>",
-        "<b>Siglas:</b> ", siglas_ac, "<br/>",
-        "<b>Riqueza de félidos:</b> ", riqueza
-      ),
-      group       = "Riqueza por área de conservación"
-    ) |>
-    addCircleMarkers(
-      data           = datos,
-      radius         = 5,
-      color          = "white",
-      weight         = 1,
-      stroke         = TRUE,
-      fillColor      = "#cb181d",
-      fillOpacity    = 0.9,
-      label          = ~species,
-      popup          = ~paste0(
-        "<b>Especie:</b> ", species,   "<br/>",
-        "<b>Localidad:</b> ", locality, "<br/>",
-        "<b>Fecha:</b> ", eventDate
-      ),
-      clusterOptions = markerClusterOptions(),
-      group          = "Félidos"
-    ) |>
-    addLegend(
-      data     = areas_riqueza,
-      position = "bottomright",
-      pal      = paleta_riqueza,
-      values   = ~riqueza,
-      title    = "Riqueza",
-      opacity  = 0.7
-    ) |>
+    addProviderTiles(providers$CartoDB.Positron, group = "CartoDB Positron")
+
+  # Áreas de conservación: con relleno de coropleta (+ leyenda) o solo el borde,
+  # según el checkboxInput "mostrar_coropleta".
+  if (input$mostrar_coropleta) {
+    mapa <- mapa |>
+      addPolygons(
+        data        = areas_riqueza,
+        weight      = 1,
+        color       = "black",
+        fillColor   = ~paleta_riqueza(riqueza),
+        fillOpacity = 0.7,
+        label       = ~nombre_ac,
+        popup       = ~paste0(
+          "<b>Área de conservación:</b> ", nombre_ac, "<br/>",
+          "<b>Siglas:</b> ", siglas_ac, "<br/>",
+          "<b>Riqueza de félidos:</b> ", riqueza
+        ),
+        group       = "Riqueza por área de conservación"
+      ) |>
+      addLegend(
+        data     = areas_riqueza,
+        position = "bottomright",
+        pal      = paleta_riqueza,
+        values   = ~riqueza,
+        title    = "Riqueza",
+        opacity  = 0.7
+      )
+    grupo_areas <- "Riqueza por área de conservación"
+  } else {
+    mapa <- mapa |>
+      addPolygons(
+        data        = areas_riqueza,
+        weight      = 1,
+        color       = "black",
+        fillOpacity = 0,
+        label       = ~nombre_ac,
+        group       = "Áreas de conservación"
+      )
+    grupo_areas <- "Áreas de conservación"
+  }
+
+  # Registros de presencia: según el radioButtons "vis_puntos".
+  if (input$vis_puntos == "Mapa de calor") {
+    mapa <- mapa |>
+      addHeatmap(
+        data       = datos,
+        radius     = 15,
+        blur       = 20,
+        minOpacity = 0.3,
+        group      = "Mapa de calor"
+      )
+    grupo_registros <- "Mapa de calor"
+  } else {
+    # "Agrupados" usa agrupamiento de marcadores; "Individuales" no.
+    opciones_cluster <-
+      if (input$vis_puntos == "Agrupados") markerClusterOptions() else NULL
+
+    mapa <- mapa |>
+      addCircleMarkers(
+        data           = datos,
+        radius         = 5,
+        color          = "white",
+        weight         = 1,
+        stroke         = TRUE,
+        fillColor      = "#cb181d",
+        fillOpacity    = 0.9,
+        label          = ~species,
+        popup          = ~paste0(
+          "<b>Especie:</b> ", species,   "<br/>",
+          "<b>Localidad:</b> ", locality, "<br/>",
+          "<b>Fecha:</b> ", eventDate
+        ),
+        clusterOptions = opciones_cluster,
+        group          = "Félidos"
+      )
+    grupo_registros <- "Félidos"
+  }
+
+  mapa |>
     addLayersControl(
       baseGroups    = c("OpenStreetMap", "CartoDB Positron"),
-      overlayGroups = c("Riqueza por área de conservación", "Félidos"),
+      overlayGroups = c(grupo_areas, grupo_registros),
       options       = layersControlOptions(collapsed = FALSE)
     ) |>
     addScaleBar(position = "bottomleft")
@@ -349,5 +453,16 @@ output$tabla <- renderDataTable({
       )
     ) |>
     formatRound(c("decimalLongitude", "decimalLatitude"), digits = 5)
+})
+
+# Botón "Restablecer filtros": al hacer clic (input$reset), devuelve todos los
+# controles de la barra lateral a sus valores iniciales con las funciones
+# update*Input(). Es un ejemplo de cómo el servidor modifica la interfaz.
+observeEvent(input$reset, {
+  updateCheckboxGroupInput(session, "especies", selected = sort(unique(felidos$species)))
+  updateSelectInput(session, "area", selected = "Todas")
+  updateSliderInput(session, "anios", value = c(anio_min, anio_max))
+  updateRadioButtons(session, "vis_puntos", selected = "Agrupados")
+  updateCheckboxInput(session, "mostrar_coropleta", value = TRUE)
 })
 ```
