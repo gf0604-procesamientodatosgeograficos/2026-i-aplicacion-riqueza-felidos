@@ -35,13 +35,13 @@ library(bsicons)        # íconos de Bootstrap
 
 # Áreas de conservación del SINAC (polígonos)
 areas_conservacion <- st_read(
-  "https://github.com/gf0604-procesamientodatosgeograficos/2026-i/raw/refs/heads/main/datos/sinac/areas-conservacion.gpkg",
+  "datos/areas-conservacion.gpkg",
   quiet = TRUE
 )
 
 # Registros de presencia de félidos silvestres (puntos)
 felidos <- st_read(
-  "https://raw.githubusercontent.com/gf0604-procesamientodatosgeograficos/2026-i/refs/heads/main/datos/gbif/felidos.csv",
+  "datos/felidos.csv",
   options = c(
     "X_POSSIBLE_NAMES=decimalLongitude", # columna de longitud decimal
     "Y_POSSIBLE_NAMES=decimalLatitude"   # columna de latitud decimal
