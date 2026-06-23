@@ -1,5 +1,7 @@
 # Aplicación interactiva de riqueza de félidos de Costa Rica
 
+[![Aplicación interactiva de riqueza de félidos de Costa Rica](img/portada.png)](https://mfvargas.shinyapps.io/riqueza-felidos/)
+
 > 🔗 **[Ver la aplicación en vivo](https://mfvargas.shinyapps.io/riqueza-felidos/)**
 
 Aplicación web interactiva desarrollada con [Shiny](https://shiny.posit.co/) y
