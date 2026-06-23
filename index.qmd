@@ -99,7 +99,7 @@ selectInput(
 
 # Riqueza de félidos
 
-## Row {height="20%"}
+## Row {height="15%"}
 
 ```{r}
 #| label: salida-valuebox-registros
@@ -122,30 +122,33 @@ uiOutput(outputId = "vb_especies")
 uiOutput(outputId = "vb_areas")
 ```
 
-## Row {.tabset}
+## Row {height="55%"}
 
-### Mapa
+### Column {width="60%"}
 
 ```{r}
 #| label: salida-mapa
+#| title: "Registros de presencia"
 
 # Control de salida del mapa
 leafletOutput(outputId = "mapa")
 ```
 
-### Gráfico
+### Column {width="40%"}
 
 ```{r}
 #| label: salida-grafico
+#| title: "Riqueza por área de conservación"
 
 # Control de salida del gráfico
 plotlyOutput(outputId = "grafico")
 ```
 
-### Tabla
+## Row {height="30%"}
 
 ```{r}
 #| label: salida-tabla
+#| title: "Registros de presencia de félidos"
 
 # Control de salida de la tabla
 dataTableOutput(outputId = "tabla")
