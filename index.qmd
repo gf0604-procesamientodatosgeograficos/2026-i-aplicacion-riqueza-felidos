@@ -229,26 +229,53 @@ output$vb_areas <- renderUI({
   )
 })
 
-# Mapa de registros de presencia (agrupados) sobre las áreas de conservación
+# Mapa de coropletas de riqueza por área de conservación, con los registros
+# de presencia (agrupados) encima. Todo se recalcula con los datos filtrados.
 output$mapa <- renderLeaflet({
+  datos <- felidos_filtrados()
+
+  # Riqueza (especies distintas) por área de conservación entre los datos filtrados
+  riqueza_por_area <-
+    datos |>
+    st_drop_geometry() |>
+    filter(!is.na(codigo_ac)) |>
+    group_by(codigo_ac) |>
+    summarize(riqueza = n_distinct(species), .groups = "drop")
+
+  # Unión por atributo a los polígonos simplificados; áreas sin registros = 0
+  areas_riqueza <-
+    left_join(areas_conservacion_simplificadas, riqueza_por_area, by = "codigo_ac") |>
+    replace_na(list(riqueza = 0))
+
+  # Paleta de coropletas (verde) según la riqueza de especies
+  paleta_riqueza <- colorNumeric(palette = "Greens", domain = areas_riqueza$riqueza)
+
   leaflet() |>
-    setView(lng = -84.2, lat = 9.6, zoom = 7) |>
+    setView(lng = -84.2, lat = 9.6, zoom = 8) |>
     addProviderTiles(providers$OpenStreetMap,    group = "OpenStreetMap") |>
     addProviderTiles(providers$CartoDB.Positron, group = "CartoDB Positron") |>
     addPolygons(
-      data        = areas_conservacion_simplificadas,
+      data        = areas_riqueza,
       weight      = 1,
       color       = "black",
-      fillOpacity = 0,
+      fillColor   = ~paleta_riqueza(riqueza),
+      fillOpacity = 0.7,
       label       = ~nombre_ac,
-      group       = "Áreas de conservación"
+      popup       = ~paste0(
+        "<b>Área de conservación:</b> ", nombre_ac, "<br/>",
+        "<b>Siglas:</b> ", siglas_ac, "<br/>",
+        "<b>Riqueza de félidos:</b> ", riqueza
+      ),
+      group       = "Riqueza por área de conservación"
     ) |>
     addCircleMarkers(
-      data           = felidos_filtrados(),
+      data           = datos,
       radius         = 5,
-      color          = "#41ab5d",
-      stroke         = FALSE,
-      fillOpacity    = 0.7,
+      color          = "white",
+      weight         = 1,
+      stroke         = TRUE,
+      fillColor      = "#cb181d",
+      fillOpacity    = 0.9,
       label          = ~species,
       popup          = ~paste0(
         "<b>Especie:</b> ", species,   "<br/>",
@@ -258,9 +285,17 @@ output$mapa <- renderLeaflet({
       clusterOptions = markerClusterOptions(),
       group          = "Félidos"
     ) |>
+    addLegend(
+      data     = areas_riqueza,
+      position = "bottomright",
+      pal      = paleta_riqueza,
+      values   = ~riqueza,
+      title    = "Riqueza",
+      opacity  = 0.7
+    ) |>
     addLayersControl(
       baseGroups    = c("OpenStreetMap", "CartoDB Positron"),
-      overlayGroups = c("Áreas de conservación", "Félidos"),
+      overlayGroups = c("Riqueza por área de conservación", "Félidos"),
       options       = layersControlOptions(collapsed = FALSE)
     ) |>
     addScaleBar(position = "bottomleft")
