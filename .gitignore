@@ -28,3 +28,6 @@
 
 # Metadatos de despliegue de rsconnect
 /rsconnect/
+
+# Archivos auxiliares que GDAL genera al leer las capas (no son datos fuente)
+*.aux.xml
