@@ -135,18 +135,6 @@ radioButtons(
 ```
 
 ```{r}
-#| label: control-coropleta
-
-# checkboxInput: casilla única (verdadero/falso) para mostrar u ocultar la
-# coropleta de riqueza de especies por área de conservación.
-checkboxInput(
-  inputId = "mostrar_coropleta",
-  label   = "Mostrar coropleta de riqueza",
-  value   = TRUE
-)
-```
-
-```{r}
 #| label: boton-reset
 
 # actionButton: botón que dispara una acción en el servidor; aquí restablece
@@ -291,9 +279,8 @@ output$vb_areas <- renderUI({
   )
 })
 
-# Mapa interactivo. Reacciona a los datos filtrados y, además, a dos controles
-# de presentación: la casilla de la coropleta y los botones de visualización de
-# registros (agrupados / individuales / mapa de calor).
+# Mapa interactivo. Reacciona a los datos filtrados y, además, al control de
+# visualización de registros (agrupados / individuales / mapa de calor).
 output$mapa <- renderLeaflet({
   datos <- felidos_filtrados()
 
@@ -319,45 +306,31 @@ output$mapa <- renderLeaflet({
     addProviderTiles(providers$OpenStreetMap,    group = "OpenStreetMap") |>
     addProviderTiles(providers$CartoDB.Positron, group = "CartoDB Positron")
 
-  # Áreas de conservación: con relleno de coropleta (+ leyenda) o solo el borde,
-  # según el checkboxInput "mostrar_coropleta".
-  if (input$mostrar_coropleta) {
-    mapa <- mapa |>
-      addPolygons(
-        data        = areas_riqueza,
-        weight      = 1,
-        color       = "black",
-        fillColor   = ~paleta_riqueza(riqueza),
-        fillOpacity = 0.7,
-        label       = ~nombre_ac,
-        popup       = ~paste0(
-          "<b>Área de conservación:</b> ", nombre_ac, "<br/>",
-          "<b>Siglas:</b> ", siglas_ac, "<br/>",
-          "<b>Riqueza de félidos:</b> ", riqueza
-        ),
-        group       = "Riqueza por área de conservación"
-      ) |>
-      addLegend(
-        data     = areas_riqueza,
-        position = "bottomright",
-        pal      = paleta_riqueza,
-        values   = ~riqueza,
-        title    = "Riqueza",
-        opacity  = 0.7
-      )
-    grupo_areas <- "Riqueza por área de conservación"
-  } else {
-    mapa <- mapa |>
-      addPolygons(
-        data        = areas_riqueza,
-        weight      = 1,
-        color       = "black",
-        fillOpacity = 0,
-        label       = ~nombre_ac,
-        group       = "Áreas de conservación"
-      )
-    grupo_areas <- "Áreas de conservación"
-  }
+  # Áreas de conservación con relleno de coropleta de riqueza (+ leyenda).
+  mapa <- mapa |>
+    addPolygons(
+      data        = areas_riqueza,
+      weight      = 1,
+      color       = "black",
+      fillColor   = ~paleta_riqueza(riqueza),
+      fillOpacity = 0.7,
+      label       = ~nombre_ac,
+      popup       = ~paste0(
+        "<b>Área de conservación:</b> ", nombre_ac, "<br/>",
+        "<b>Siglas:</b> ", siglas_ac, "<br/>",
+        "<b>Riqueza de félidos:</b> ", riqueza
+      ),
+      group       = "Riqueza por área de conservación"
+    ) |>
+    addLegend(
+      data     = areas_riqueza,
+      position = "bottomright",
+      pal      = paleta_riqueza,
+      values   = ~riqueza,
+      title    = "Riqueza",
+      opacity  = 0.7
+    )
+  grupo_areas <- "Riqueza por área de conservación"
 
   # Registros de presencia: según el radioButtons "vis_puntos".
   if (input$vis_puntos == "Mapa de calor") {
@@ -463,6 +436,5 @@ observeEvent(input$reset, {
   updateSelectInput(session, "area", selected = "Todas")
   updateSliderInput(session, "anios", value = c(anio_min, anio_max))
   updateRadioButtons(session, "vis_puntos", selected = "Agrupados")
-  updateCheckboxInput(session, "mostrar_coropleta", value = TRUE)
 })
 ```
